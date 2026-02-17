@@ -1,4 +1,4 @@
-# 智能视频合成与防重复系统
+# VideoCut — 智能视频合成与防重复系统
 
 基于 [Feasibility.md](./Feasibility.md) 实现的云端素材库 + 分镜脚本驱动 + 防重复视频合成流水线。
 
@@ -12,25 +12,18 @@
 ## 项目结构
 
 ```
-qmt/
+VideoCut/
 ├── config/           # 配置
 │   └── settings.py
 ├── models/           # 数据模型（Asset, Clip, ShotList, RandomParams 等）
-├── services/         # 核心服务
-│   ├── material_library.py   # 素材库检索与选片
-│   ├── shot_list_parser.py   # 分镜脚本解析
-│   ├── anti_duplicate.py     # 随机参数、帧哈希、查重
-│   └── video_synthesis.py   # FFmpeg 剪辑
-├── agent/            # 编排层
-│   ├── tools.py      # 选片、查重、剪辑等工具
-│   └── graph.py      # 合成流程编排（解析→选片→剪辑→查重→重试）
+├── agent/            # 编排与核心逻辑
+│   └── graph.py      # 素材库、分镜解析、随机参数、FFmpeg 剪辑、成片查重与重试
 ├── api/              # FastAPI
 │   └── main.py       # 防重复 API、合成触发
-├── tasks/            # 异步任务
-│   └── clip_variant_tasks.py  # 生成 Clip 多版本（镜像、变速、裁剪）
 ├── shot_lists/       # 分镜脚本示例
 │   └── cruise_scenic_v1.yaml
 ├── Feasibility.md    # 技术可行性文档
+├── .env.example      # 环境变量示例
 └── requirements.txt
 ```
 
@@ -39,9 +32,12 @@ qmt/
 ### 1. 安装依赖
 
 ```bash
-cd d:\Test\qmt
+cd VideoCut
 python -m venv .venv
-.venv\Scripts\activate   # Windows
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -49,12 +45,20 @@ pip install -r requirements.txt
 
 ### 2. 配置
 
-可选：在项目根目录创建 `.env`，覆盖默认配置，例如：
+可选：复制 `.env.example` 为 `.env` 并按需修改：
+
+```bash
+cp .env.example .env
+```
+
+示例 `.env` 项：
 
 ```env
 SIMILARITY_THRESHOLD=0.85
 MAX_RETRY_ON_DUPLICATE=3
+FRAME_SAMPLE_INTERVAL_SEC=1.0
 DATA_DIR=./data
+DATABASE_URL=sqlite:///./qmt.db
 ```
 
 ### 3. 启动 API 服务
@@ -69,6 +73,8 @@ uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 - 触发生成：`POST http://localhost:8000/api/synthesis/run`，form: `shot_list_path=cruise_scenic_v1.yaml`，可选 `seed=12345`
 
 ### 4. 命令行直接跑合成（不经过 API）
+
+在项目根目录下运行：
 
 ```python
 from pathlib import Path
@@ -85,10 +91,8 @@ print(result)  # {"success": True, "output_path": "...", "video_id": "...", ...}
 ## 素材库使用（当前为内存存储）
 
 ```python
-from uuid import uuid4
 from models.asset import Asset, AssetType, AssetMetadata, Clip, ClipVariant, TransformType
-from services.material_library import add_asset, add_clip, add_clip_variant
-from tasks.clip_variant_tasks import generate_all_variants_for_clip
+from agent.graph import add_asset, add_clip, add_clip_variant, generate_all_variants_for_clip
 
 # 注册一条素材
 asset = Asset(
@@ -129,10 +133,9 @@ for v in variants:
 
 ## 扩展与生产化
 
-- **持久化**：将 `services/material_library.py` 与 `services/anti_duplicate.py` 中的内存字典改为 SQLAlchemy + PostgreSQL，指纹可存表或 Redis。
+- **持久化**：将 `agent/graph.py` 中素材库与防重复的内存字典改为 SQLAlchemy + PostgreSQL，指纹可存表或 Redis。
 - **对象存储**：上传与成片输出改为 OSS/COS，`source_file_path` / `output_path` 存 URL 或 bucket key。
-- **任务队列**：ClipVariant 生成、成片剪辑、爬虫等改为 Celery/Dramatiq 异步任务。
-- **LangGraph**：在 `agent/graph.py` 中接入 LangGraph 状态图，实现更复杂分支与人工干预节点。
+- **任务队列**：ClipVariant 生成、成片剪辑等改为 Celery/Dramatiq 异步任务。
+- **LangGraph**：在 `agent/graph.py` 中进一步接入 LangGraph 状态图，实现更复杂分支与人工干预节点。
 
 详细设计见 [Feasibility.md](./Feasibility.md)。
-# VideoCut
